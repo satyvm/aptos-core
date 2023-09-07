@@ -251,6 +251,26 @@ module std::features {
         is_enabled(AGGREGATOR_SNAPSHOTS)
     }
 
+    const SAFER_RESOURCE_GROUPS: u64 = 31;
+
+    const SAFER_METADATA: u64 = 32;
+
+    /// Whether the efficient and concurrent execution of aggregators is enabled.
+    /// Without this flag, aggregators are executed sequentially, creating
+    /// read/write conflicts.
+    /// After this flag is enabled, aggregators modifications stop creating conflicts,
+    /// when possible to optimize out.
+    const AGGREGATOR_EXECUTION: u64 = 33;
+
+    /// Whether enable TokenV2 collection creation and Fungible Asset creation
+    /// to create higher throughput concurrent variants.
+    /// Lifetime: transient
+    const CONCURRENT_ASSETS_ENABLED: u64 = 34;
+
+    public fun concurrent_assets_enabled(): bool acquires Features {
+        is_enabled(CONCURRENT_ASSETS_ENABLED)
+    }
+
     // ============================================================================================
     // Feature Flag Implementation
 

@@ -100,6 +100,7 @@ impl Processor {
         // The transactions buffer to store the transactions fetched from cache.
         let mut transactions_buffer: Vec<EncodedTransactionWithVersion> = vec![];
         let mut tps_calculator = MovingAverage::new(10_000);
+
         loop {
             // 0. Data verfiication.
             // File store version has to be a multiple of BLOB_STORAGE_SIZE.

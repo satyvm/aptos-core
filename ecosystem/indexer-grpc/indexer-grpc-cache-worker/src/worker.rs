@@ -62,8 +62,11 @@ impl Worker {
         redis_main_instance_address: String,
         file_store: IndexerGrpcFileStoreConfig,
     ) -> Self {
-        let redis_client = redis::Client::open(format!("redis://{}", redis_main_instance_address))
-            .expect("Create redis client failed.");
+        let address = format!("redis://{}", redis_main_instance_address);
+        let redis_client = redis::Client::open(address.clone()).expect(&format!(
+            "Create redis client failed for address {}",
+            address
+        ));
         Self {
             redis_client,
             file_store,

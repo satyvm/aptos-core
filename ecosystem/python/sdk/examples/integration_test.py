@@ -88,7 +88,7 @@ class Test(unittest.IsolatedAsyncioTestCase):
             "..", "..", "..", "aptos-move", "move-examples", "moon_coin"
         )
         AptosCLIWrapper.test_package(
-            moon_coin_path, {"MoonCoin": AccountAddress.from_str("0x0a")}
+            moon_coin_path, {"MoonCoin": AccountAddress.from_str("0xa")}
         )
         await your_coin.main(moon_coin_path)
 

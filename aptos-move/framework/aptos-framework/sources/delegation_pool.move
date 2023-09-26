@@ -963,6 +963,23 @@ module aptos_framework::delegation_pool {
         stake::set_operator(&retrieve_stake_pool_owner(borrow_global<DelegationPool>(pool_address)), new_operator);
     }
 
+    /// Allows an owner to update the commission percentage for the operator of the underlying stake pool.
+    public entry fun update_commission_percentage(
+        owner: &signer,
+        new_commission_percentage: u64
+    ) acquires DelegationPoolOwnership, DelegationPool, GovernanceRecords {
+        assert!(new_commission_percentage <= MAX_FEE, error::invalid_argument(EINVALID_COMMISSION_PERCENTAGE));
+        let pool_address = get_owned_pool_address(signer::address_of(owner));
+        // synchronize delegation and stake pools before any user operation
+        // ensure the operator is paid its uncommitted commission rewards
+        // with the old commission percentage
+        synchronize_delegation_pool(pool_address);
+
+        let delegation_pool = borrow_global_mut<DelegationPool>(pool_address);
+
+        delegation_pool.operator_commission_percentage = new_commission_percentage;
+    }
+
     /// Allows an owner to change the delegated voter of the underlying stake pool.
     public entry fun set_delegated_voter(
         owner: &signer,

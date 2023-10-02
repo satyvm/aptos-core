@@ -7,9 +7,10 @@ import os
 import subprocess
 import shutil
 import sys
-import math
 from multiprocessing import Pool, freeze_support
 from typing import Tuple
+from collections import deque
+
 
 from verify_core.common import clear_artifacts, query_backup_latest_version
 
@@ -29,7 +30,7 @@ from verify_core.common import clear_artifacts, query_backup_latest_version
 #  2. meanwhile, the oncall should delete the old ranges that are beyond 300M window that we want to scan
 #
 
-testnet_runner_mapping = [
+TESTNET_RANGES = [
     [250000000, 255584106],
     [255584107, 271874718],
     [271874719, 300009463],
@@ -49,7 +50,7 @@ testnet_runner_mapping = [
     [640_000_001, sys.maxsize],
 ]
 
-mainnet_runner_mapping = [
+MAINNET_RANGES = [
     [0, 50_000_000],
     [50_000_001, 100_000_000],
     [100_000_001, 110_000_000],
@@ -74,14 +75,14 @@ def replay_with_retry(*args):
     MAX_RETRIES = 3
     attempt = 0
     while attempt < MAX_RETRIES:
-        (n, return_code) = replay_verify_partition(*args)
+        (n, return_code, msg) = replay_verify_partition(*args)
         if return_code == 0:
-            return (n, return_code)
+            return (n, return_code, msg)
         elif attempt < MAX_RETRIES - 1:
             print(f"Attempt {attempt + 1} failed for arguments {args}. Retrying.")
             attempt += 1
         else:
-            return (n, return_code)
+            return (n, return_code, msg)
 
 
 def replay_verify_partition(
@@ -92,7 +93,7 @@ def replay_verify_partition(
     latest_version: int,
     txns_to_skip: Tuple[int],
     backup_config_template_path: str,
-) -> Tuple[int, int]:
+) -> Tuple[int, int, str]:
     """
     Run replay-verify for a partition of the backup, returning a tuple of the (partition number, return code)
 
@@ -105,15 +106,16 @@ def replay_verify_partition(
     backup_config_template_path: path to the backup config template
     """
     end = history_start + n * per_partition
-    if n == N - 1 and end < latest_version:
+    if n == N and end < latest_version:
         end = latest_version
 
     start = end - per_partition
     partition_name = f"run_{n}_{start}_{end}"
 
     print(f"[partition {n}] spawning {partition_name}")
-    os.mkdir(partition_name)
-    shutil.copytree("metadata-cache", f"{partition_name}/metadata-cache")
+    if not os.path.exists(partition_name):
+        os.mkdir(partition_name)
+        os.mkdir(f"{partition_name}/metadata-cache")
 
     txns_to_skip_args = [f"--txns-to-skip={txn}" for txn in txns_to_skip]
 
@@ -124,11 +126,11 @@ def replay_verify_partition(
             "replay-verify",
             *txns_to_skip_args,
             "--concurrent-downloads",
-            "2",
+            "8",
             "--replay-concurrency-level",
             "2",
             "--metadata-cache-dir",
-            f"./{partition_name}/metadata-cache",
+            f"./{partition_name}/metadata-cache", # all partitions can share the same metadata cache
             "--target-db-dir",
             f"./{partition_name}/db",
             "--start-version",
@@ -143,16 +145,16 @@ def replay_verify_partition(
     )
     if process.stdout is None:
         raise Exception(f"[partition {n}] stdout is None")
+    last_lines = deque(maxlen=5)
     for line in iter(process.stdout.readline, b""):
         print(f"[partition {n}] {line}", flush=True)
-
-    # set the returncode
+        last_lines.append(line)
     process.communicate()
 
-    return (n, process.returncode)
+    return (n, process.returncode, b'\n'.join(last_lines))
 
 
-def main():
+def main(runner_no, runner_cnt):
     # collect all required ENV variables
     REQUIRED_ENVS = [
         "BUCKET",
@@ -164,13 +166,20 @@ def main():
 
     if not all(env in os.environ for env in REQUIRED_ENVS):
         raise Exception("Missing required ENV variables")
-    (runner_no, runner_cnt) = (
-        (int(sys.argv[1]), int(sys.argv[2])) if len(sys.argv) > 2 else (None, None)
+
+
+    # the runner may have small overlap at the boundary to prevent missing any transactions
+    runner_mapping = (
+        TESTNET_RANGES
+        if "testnet" in os.environ["BUCKET"]
+        else MAINNET_RANGES
     )
-    # by default we only run one job
+
+    # by default we only have 1 runner
     if runner_no is None or runner_cnt is None:
         runner_no = 0
         runner_cnt = 1
+        runner_mapping = [[runner_mapping[0][0], runner_mapping[-1][1]]]
 
     assert (
         runner_no >= 0 and runner_no < runner_cnt
@@ -192,14 +201,6 @@ def main():
     else:
         print("[main process] skipping clearing backup artifacts")
 
-    LATEST_VERSION = query_backup_latest_version(BACKUP_CONFIG_TEMPLATE_PATH)
-
-    # the runner may have small overlap at the boundary to prevent missing any transactions
-    runner_mapping = (
-        testnet_runner_mapping
-        if "testnet" in os.environ["BUCKET"]
-        else mainnet_runner_mapping
-    )
 
     assert runner_cnt == len(
         runner_mapping
@@ -207,8 +208,14 @@ def main():
     runner_start = runner_mapping[runner_no][0]
     runner_end = runner_mapping[runner_no][1]
     if runner_no == runner_cnt - 1:
+        LATEST_VERSION = runner_end
+        try:
+            LATEST_VERSION = query_backup_latest_version(BACKUP_CONFIG_TEMPLATE_PATH)
+        except Exception as e:
+            print(f"Failed to query latest version from backup: {e}")
         runner_end = LATEST_VERSION
     print("runner start %d end %d" % (runner_start, runner_end))
+
     # run replay-verify in parallel
     N = 16
     PER_PARTITION = (runner_end - runner_start) // N
@@ -226,17 +233,17 @@ def main():
                     TXNS_TO_SKIP,
                     BACKUP_CONFIG_TEMPLATE_PATH,
                 )
-                for n in range(1, N)
+                for n in range(1, N+1)
             ],
         )
 
     print("[main process] finished")
 
     err = False
-    for partition_num, return_code in all_partitions:
+    for partition_num, return_code, msg in all_partitions:
         if return_code != 0:
             print("======== ERROR ========")
-            print(f"ERROR: partition {partition_num} failed (exit {return_code})")
+            print(f"ERROR: partition {partition_num} failed with exit status {return_code}, {msg})")
             err = True
 
     if err:
@@ -245,4 +252,7 @@ def main():
 
 if __name__ == "__main__":
     freeze_support()
-    main()
+    (runner_no, runner_cnt) = (
+        (int(sys.argv[1]), int(sys.argv[2])) if len(sys.argv) > 2 else (None, None)
+    )
+    main(runner_no, runner_cnt)

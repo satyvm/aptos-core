@@ -5,7 +5,9 @@
 
 use crate::{
     aptos_vm_impl::gas_config,
-    move_vm_ext::{get_max_binary_format_version, AptosMoveResolver, AsExecutorView},
+    move_vm_ext::{
+        get_max_binary_format_version, AptosMoveResolver, AsExecutorView, ResourceGroupResolver,
+    },
     storage_adapter::ExecutorViewBase,
 };
 #[allow(unused_imports)]
@@ -215,13 +217,35 @@ impl<'e, E: ExecutorView> StorageAdapter<'e, E> {
     }
 }
 
-impl<'e, E: ExecutorView> AptosMoveResolver for StorageAdapter<'e, E> {
+impl<'e, E: ExecutorView> ResourceGroupResolver for StorageAdapter<'e, E> {
     fn release_resource_group_cache(
         &self,
     ) -> Option<HashMap<StateKey, BTreeMap<StructTag, Bytes>>> {
         apply_to_group_view!(self, release_naive_group_cache())
     }
+
+    fn resource_group_size(&self, state_key: &StateKey) -> anyhow::Result<u64> {
+        apply_to_group_view!(self, resource_group_size(state_key))
+    }
+
+    fn resource_size_in_group(
+        &self,
+        state_key: &StateKey,
+        resource_tag: &StructTag,
+    ) -> anyhow::Result<u64> {
+        apply_to_group_view!(self, resource_size_in_group(state_key, resource_tag))
+    }
+
+    fn resource_exists_in_group(
+        &self,
+        state_key: &StateKey,
+        resource_tag: &StructTag,
+    ) -> anyhow::Result<bool> {
+        apply_to_group_view!(self, resource_exists_in_group(state_key, resource_tag))
+    }
 }
+
+impl<'e, E: ExecutorView> AptosMoveResolver for StorageAdapter<'e, E> {}
 
 impl<'e, E: ExecutorView> ResourceResolver for StorageAdapter<'e, E> {
     fn get_resource_with_metadata(
@@ -354,5 +378,20 @@ impl<'e, E: ExecutorView> StateValueMetadataResolver for StorageAdapter<'e, E> {
 impl<'e, E: ExecutorView> AsExecutorView for StorageAdapter<'e, E> {
     fn as_executor_view(&self) -> &dyn ExecutorView {
         self.executor_view.deref()
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+
+    // Expose a method to create a storage adapter with a provided group size kind.
+    pub(crate) fn as_resolver_with_group_size_kind<S: StateView>(
+        state_view: &S,
+        group_size_kind: GroupSizeKind,
+    ) -> StorageAdapter<ExecutorViewBase<S>> {
+        let exec_view =
+            ExecutorViewKind::Owned(ExecutorViewBase::new(state_view, group_size_kind.clone()));
+        StorageAdapter::new(exec_view, 0, group_size_kind, None)
     }
 }

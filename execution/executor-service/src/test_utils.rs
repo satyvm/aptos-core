@@ -102,7 +102,7 @@ pub fn compare_txn_outputs(
 }
 
 pub fn test_sharded_block_executor_no_conflict<E: ExecutorClient<FakeDataStore>>(
-    sharded_block_executor: ShardedBlockExecutor<FakeDataStore, E>,
+    mut sharded_block_executor: ShardedBlockExecutor<FakeDataStore, E>,
 ) {
     let num_txns = 400;
     let num_shards = sharded_block_executor.num_shards();
@@ -135,10 +135,11 @@ pub fn test_sharded_block_executor_no_conflict<E: ExecutorClient<FakeDataStore>>
     )
     .unwrap();
     compare_txn_outputs(unsharded_txn_output, sharded_txn_output);
+    sharded_block_executor.shutdown();
 }
 
 pub fn sharded_block_executor_with_conflict<E: ExecutorClient<FakeDataStore>>(
-    sharded_block_executor: ShardedBlockExecutor<FakeDataStore, E>,
+    mut sharded_block_executor: ShardedBlockExecutor<FakeDataStore, E>,
     concurrency: usize,
 ) {
     let num_txns = 800;
@@ -187,4 +188,5 @@ pub fn sharded_block_executor_with_conflict<E: ExecutorClient<FakeDataStore>>(
     let unsharded_txn_output =
         AptosVM::execute_block(execution_ordered_txns, executor.data_store(), None).unwrap();
     compare_txn_outputs(unsharded_txn_output, sharded_txn_output);
+    sharded_block_executor.shutdown();
 }

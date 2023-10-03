@@ -1733,15 +1733,16 @@ fn realistic_network_tuned_for_throughput_test() -> ForgeConfig {
             config.storage.rocksdb_configs.skip_index_and_usage = true;
         }))
         .with_fullnode_override_node_config_fn(Arc::new(|config, _| {
+            // Mempool config optimizations
+            mempool_config_practically_non_expiring(&mut config.mempool);
+
             // Higher concurrency level
             config.execution.concurrency_level = 48;
 
             // Experimental storage optimizations
-            /*
             config.storage.rocksdb_configs.split_ledger_db = true;
             config.storage.rocksdb_configs.use_sharded_state_merkle_db = true;
             config.storage.rocksdb_configs.skip_index_and_usage = true;
-             */
         }))
         .with_validator_resource_override(NodeResourceOverride {
             cpu_cores: Some(58),

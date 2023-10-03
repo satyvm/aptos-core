@@ -1737,9 +1737,11 @@ fn realistic_network_tuned_for_throughput_test() -> ForgeConfig {
             config.execution.concurrency_level = 48;
 
             // Experimental storage optimizations
+            /*
             config.storage.rocksdb_configs.split_ledger_db = true;
             config.storage.rocksdb_configs.use_sharded_state_merkle_db = true;
             config.storage.rocksdb_configs.skip_index_and_usage = true;
+             */
         }))
         .with_validator_resource_override(NodeResourceOverride {
             cpu_cores: Some(58),

@@ -44,6 +44,7 @@ require adding the field original_name.
 -  [Function `increment_concurrent_supply`](#0x4_collection_increment_concurrent_supply)
 -  [Function `decrement_supply`](#0x4_collection_decrement_supply)
 -  [Function `generate_mutator_ref`](#0x4_collection_generate_mutator_ref)
+-  [Function `upgrade_to_concurrent`](#0x4_collection_upgrade_to_concurrent)
 -  [Function `check_collection_exists`](#0x4_collection_check_collection_exists)
 -  [Function `borrow`](#0x4_collection_borrow)
 -  [Function `count`](#0x4_collection_count)
@@ -496,6 +497,16 @@ The URI is over the maximum length
 
 
 
+<a name="0x4_collection_EALREADY_CONCURRENT"></a>
+
+Tried upgrading collection to concurrent, but collection is already concurrent
+
+
+<pre><code><b>const</b> <a href="collection.md#0x4_collection_EALREADY_CONCURRENT">EALREADY_CONCURRENT</a>: u64 = 8;
+</code></pre>
+
+
+
 <a name="0x4_collection_ECOLLECTION_DOES_NOT_EXIST"></a>
 
 The collection does not exist
@@ -522,6 +533,16 @@ The collection has reached its supply and no more tokens can be minted, unless s
 
 
 <pre><code><b>const</b> <a href="collection.md#0x4_collection_ECOLLECTION_SUPPLY_EXCEEDED">ECOLLECTION_SUPPLY_EXCEEDED</a>: u64 = 2;
+</code></pre>
+
+
+
+<a name="0x4_collection_ECONCURRENT_NOT_ENABLED"></a>
+
+Concurrent feature flag is not yet enabled, so the function cannot be performed
+
+
+<pre><code><b>const</b> <a href="collection.md#0x4_collection_ECONCURRENT_NOT_ENABLED">ECONCURRENT_NOT_ENABLED</a>: u64 = 7;
 </code></pre>
 
 
@@ -597,10 +618,10 @@ Beyond that, it adds supply tracking with events.
     <b>let</b> constructor_ref = <a href="../../aptos-framework/doc/object.md#0x1_object_create_named_object">object::create_named_object</a>(creator, collection_seed);
     <b>let</b> object_signer = <a href="../../aptos-framework/doc/object.md#0x1_object_generate_signer">object::generate_signer</a>(&constructor_ref);
 
-    <b>if</b> (<a href="../../aptos-framework/../aptos-stdlib/../move-stdlib/doc/features.md#0x1_features_concurrent_token_v2_enabled">features::concurrent_token_v2_enabled</a>()) {
+    <b>if</b> (<a href="../../aptos-framework/../aptos-stdlib/../move-stdlib/doc/features.md#0x1_features_concurrent_assets_enabled">features::concurrent_assets_enabled</a>()) {
         <b>let</b> supply = <a href="collection.md#0x4_collection_ConcurrentSupply">ConcurrentSupply</a> {
             current_supply: <a href="../../aptos-framework/doc/aggregator_v2.md#0x1_aggregator_v2_create_aggregator">aggregator_v2::create_aggregator</a>(max_supply),
-            total_minted: <a href="../../aptos-framework/doc/aggregator_v2.md#0x1_aggregator_v2_create_aggregator">aggregator_v2::create_aggregator</a>(<a href="collection.md#0x4_collection_MAX_U64">MAX_U64</a>),
+            total_minted: <a href="../../aptos-framework/doc/aggregator_v2.md#0x1_aggregator_v2_create_unbounded_aggregator">aggregator_v2::create_unbounded_aggregator</a>(),
         };
 
         <a href="collection.md#0x4_collection_create_collection_internal">create_collection_internal</a>(
@@ -666,10 +687,10 @@ the supply of tokens.
     <b>let</b> constructor_ref = <a href="../../aptos-framework/doc/object.md#0x1_object_create_named_object">object::create_named_object</a>(creator, collection_seed);
     <b>let</b> object_signer = <a href="../../aptos-framework/doc/object.md#0x1_object_generate_signer">object::generate_signer</a>(&constructor_ref);
 
-    <b>if</b> (<a href="../../aptos-framework/../aptos-stdlib/../move-stdlib/doc/features.md#0x1_features_concurrent_token_v2_enabled">features::concurrent_token_v2_enabled</a>()) {
+    <b>if</b> (<a href="../../aptos-framework/../aptos-stdlib/../move-stdlib/doc/features.md#0x1_features_concurrent_assets_enabled">features::concurrent_assets_enabled</a>()) {
         <b>let</b> supply = <a href="collection.md#0x4_collection_ConcurrentSupply">ConcurrentSupply</a> {
-            current_supply: <a href="../../aptos-framework/doc/aggregator_v2.md#0x1_aggregator_v2_create_aggregator">aggregator_v2::create_aggregator</a>(<a href="collection.md#0x4_collection_MAX_U64">MAX_U64</a>),
-            total_minted: <a href="../../aptos-framework/doc/aggregator_v2.md#0x1_aggregator_v2_create_aggregator">aggregator_v2::create_aggregator</a>(<a href="collection.md#0x4_collection_MAX_U64">MAX_U64</a>),
+            current_supply: <a href="../../aptos-framework/doc/aggregator_v2.md#0x1_aggregator_v2_create_unbounded_aggregator">aggregator_v2::create_unbounded_aggregator</a>(),
+            total_minted: <a href="../../aptos-framework/doc/aggregator_v2.md#0x1_aggregator_v2_create_unbounded_aggregator">aggregator_v2::create_unbounded_aggregator</a>(),
         };
 
         <a href="collection.md#0x4_collection_create_collection_internal">create_collection_internal</a>(
@@ -1046,6 +1067,80 @@ Creates a MutatorRef, which gates the ability to mutate any fields that support 
 <pre><code><b>public</b> <b>fun</b> <a href="collection.md#0x4_collection_generate_mutator_ref">generate_mutator_ref</a>(ref: &ConstructorRef): <a href="collection.md#0x4_collection_MutatorRef">MutatorRef</a> {
     <b>let</b> <a href="../../aptos-framework/doc/object.md#0x1_object">object</a> = <a href="../../aptos-framework/doc/object.md#0x1_object_object_from_constructor_ref">object::object_from_constructor_ref</a>&lt;<a href="collection.md#0x4_collection_Collection">Collection</a>&gt;(ref);
     <a href="collection.md#0x4_collection_MutatorRef">MutatorRef</a> { self: <a href="../../aptos-framework/doc/object.md#0x1_object_object_address">object::object_address</a>(&<a href="../../aptos-framework/doc/object.md#0x1_object">object</a>) }
+}
+</code></pre>
+
+
+
+</details>
+
+<a name="0x4_collection_upgrade_to_concurrent"></a>
+
+## Function `upgrade_to_concurrent`
+
+
+
+<pre><code><b>public</b> <b>fun</b> <a href="collection.md#0x4_collection_upgrade_to_concurrent">upgrade_to_concurrent</a>(ref: &<a href="../../aptos-framework/doc/object.md#0x1_object_ExtendRef">object::ExtendRef</a>)
+</code></pre>
+
+
+
+<details>
+<summary>Implementation</summary>
+
+
+<pre><code><b>public</b> <b>fun</b> <a href="collection.md#0x4_collection_upgrade_to_concurrent">upgrade_to_concurrent</a>(
+    ref: &ExtendRef,
+) <b>acquires</b> <a href="collection.md#0x4_collection_FixedSupply">FixedSupply</a>, <a href="collection.md#0x4_collection_UnlimitedSupply">UnlimitedSupply</a> {
+    <b>let</b> metadata_object_address = <a href="../../aptos-framework/doc/object.md#0x1_object_address_from_extend_ref">object::address_from_extend_ref</a>(ref);
+    <b>let</b> metadata_object_signer = <a href="../../aptos-framework/doc/object.md#0x1_object_generate_signer_for_extending">object::generate_signer_for_extending</a>(ref);
+    <b>assert</b>!(<a href="../../aptos-framework/../aptos-stdlib/../move-stdlib/doc/features.md#0x1_features_concurrent_assets_enabled">features::concurrent_assets_enabled</a>(), <a href="../../aptos-framework/../aptos-stdlib/../move-stdlib/doc/error.md#0x1_error_invalid_argument">error::invalid_argument</a>(<a href="collection.md#0x4_collection_ECONCURRENT_NOT_ENABLED">ECONCURRENT_NOT_ENABLED</a>));
+
+    <b>if</b> (<b>exists</b>&lt;<a href="collection.md#0x4_collection_FixedSupply">FixedSupply</a>&gt;(metadata_object_address)) {
+        <b>let</b> <a href="collection.md#0x4_collection_FixedSupply">FixedSupply</a> {
+            current_supply,
+            max_supply,
+            total_minted,
+            burn_events,
+            mint_events,
+        } = <b>move_from</b>&lt;<a href="collection.md#0x4_collection_FixedSupply">FixedSupply</a>&gt;(metadata_object_address);
+
+        <a href="../../aptos-framework/doc/event.md#0x1_event_destroy_handle">event::destroy_handle</a>(burn_events);
+        <a href="../../aptos-framework/doc/event.md#0x1_event_destroy_handle">event::destroy_handle</a>(mint_events);
+
+        <b>let</b> supply = <a href="collection.md#0x4_collection_ConcurrentSupply">ConcurrentSupply</a> {
+            current_supply: <a href="../../aptos-framework/doc/aggregator_v2.md#0x1_aggregator_v2_create_aggregator">aggregator_v2::create_aggregator</a>(max_supply),
+            total_minted: <a href="../../aptos-framework/doc/aggregator_v2.md#0x1_aggregator_v2_create_unbounded_aggregator">aggregator_v2::create_unbounded_aggregator</a>(),
+        };
+
+        // <b>update</b> current state:
+        <a href="../../aptos-framework/doc/aggregator_v2.md#0x1_aggregator_v2_add">aggregator_v2::add</a>(&<b>mut</b> supply.current_supply, current_supply);
+        <a href="../../aptos-framework/doc/aggregator_v2.md#0x1_aggregator_v2_add">aggregator_v2::add</a>(&<b>mut</b> supply.total_minted, total_minted);
+        <b>move_to</b>(&metadata_object_signer, supply);
+    } <b>else</b> <b>if</b> (<b>exists</b>&lt;<a href="collection.md#0x4_collection_UnlimitedSupply">UnlimitedSupply</a>&gt;(metadata_object_address)) {
+        <b>let</b> <a href="collection.md#0x4_collection_UnlimitedSupply">UnlimitedSupply</a> {
+            current_supply,
+            total_minted,
+            burn_events,
+            mint_events,
+        } = <b>move_from</b>&lt;<a href="collection.md#0x4_collection_UnlimitedSupply">UnlimitedSupply</a>&gt;(metadata_object_address);
+
+        <a href="../../aptos-framework/doc/event.md#0x1_event_destroy_handle">event::destroy_handle</a>(burn_events);
+        <a href="../../aptos-framework/doc/event.md#0x1_event_destroy_handle">event::destroy_handle</a>(mint_events);
+
+        <b>let</b> supply = <a href="collection.md#0x4_collection_ConcurrentSupply">ConcurrentSupply</a> {
+            current_supply: <a href="../../aptos-framework/doc/aggregator_v2.md#0x1_aggregator_v2_create_unbounded_aggregator">aggregator_v2::create_unbounded_aggregator</a>(),
+            total_minted: <a href="../../aptos-framework/doc/aggregator_v2.md#0x1_aggregator_v2_create_unbounded_aggregator">aggregator_v2::create_unbounded_aggregator</a>(),
+        };
+
+        // <b>update</b> current state:
+        <a href="../../aptos-framework/doc/aggregator_v2.md#0x1_aggregator_v2_add">aggregator_v2::add</a>(&<b>mut</b> supply.current_supply, current_supply);
+        <a href="../../aptos-framework/doc/aggregator_v2.md#0x1_aggregator_v2_add">aggregator_v2::add</a>(&<b>mut</b> supply.total_minted, total_minted);
+        <b>move_to</b>(&metadata_object_signer, supply);
+    } <b>else</b> {
+        // untracked <a href="collection.md#0x4_collection">collection</a> is already concurrent, and other variants too.
+        <b>abort</b> <a href="../../aptos-framework/../aptos-stdlib/../move-stdlib/doc/error.md#0x1_error_invalid_argument">error::invalid_argument</a>(<a href="collection.md#0x4_collection_EALREADY_CONCURRENT">EALREADY_CONCURRENT</a>)
+    }
 }
 </code></pre>
 

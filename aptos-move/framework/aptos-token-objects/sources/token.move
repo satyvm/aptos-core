@@ -14,6 +14,7 @@ module aptos_token_objects::token {
     use aptos_framework::aggregator_v2::{Self, AggregatorSnapshot};
     use aptos_framework::event;
     use aptos_framework::object::{Self, ConstructorRef, Object};
+    use aptos_std::string_utils;
     use aptos_token_objects::collection::{Self, Collection};
     use aptos_token_objects::royalty::{Self, Royalty};
 
@@ -61,6 +62,7 @@ module aptos_token_objects::token {
 
     #[resource_group_member(group = aptos_framework::object::ObjectGroup)]
     /// Represents first addition to the common fields for all tokens
+    /// Starts being populated once aggregator_snapshots_enabled is enabled.
     struct TokenConcurrentFieldsAppendix has key {
         /// Unique identifier within the collection, optional, 0 means unassigned
         index: AggregatorSnapshot<u64>,
@@ -114,32 +116,57 @@ module aptos_token_objects::token {
         let collection_addr = collection::create_collection_address(&creator_address, &collection_name);
         let collection = object::address_to_object<Collection>(collection_addr);
 
-        let index = if (features::concurrent_assets_enabled()) {
-            option::destroy_with_default(
-                collection::increment_concurrent_supply(&collection, signer::address_of(&object_signer)),
-                aggregator_v2::create_snapshot<u64>(0)
-            )
+        // once this flag is enabled, cleanup code for aggregator_api_enabled = false.
+        let aggregator_api_enabled = features::aggregator_snapshots_enabled();
+        let concurrent_assets_enabled = aggregator_api_enabled && features::concurrent_assets_enabled();
+
+        let (deprecated_index, deprecated_name) = if (aggregator_api_enabled) {
+            let index = if (concurrent_assets_enabled) {
+                option::destroy_with_default(
+                    collection::increment_concurrent_supply(&collection, signer::address_of(&object_signer)),
+                    aggregator_v2::create_snapshot<u64>(0)
+                )
+            } else {
+                let id = collection::increment_supply(&collection, signer::address_of(&object_signer));
+                aggregator_v2::create_snapshot(option::get_with_default(&mut id, 0))
+            };
+
+            let name = if (option::is_some(&name_with_index_suffix)) {
+                aggregator_v2::string_concat(name_prefix, &index, option::extract(&mut name_with_index_suffix))
+            } else {
+                aggregator_v2::create_snapshot(name_prefix)
+            };
+
+            let deprecated_index = if (concurrent_assets_enabled) {
+                0
+            } else {
+                aggregator_v2::read_snapshot(&index)
+            };
+
+            let deprecated_name = if (concurrent_assets_enabled) {
+                string::utf8(b"")
+            } else {
+                aggregator_v2::read_snapshot(&name)
+            };
+
+            let token_concurrent = TokenConcurrentFieldsAppendix {
+                index,
+                name,
+            };
+            move_to(&object_signer, token_concurrent);
+
+            (deprecated_index, deprecated_name)
         } else {
             let id = collection::increment_supply(&collection, signer::address_of(&object_signer));
-            aggregator_v2::create_snapshot(option::get_with_default(&mut id, 0))
-        };
+            let index = option::get_with_default(&mut id, 0);
 
-        let name = if (option::is_some(&name_with_index_suffix)) {
-            aggregator_v2::string_concat(name_prefix, &index, option::extract(&mut name_with_index_suffix))
-        } else {
-            aggregator_v2::create_snapshot(name_prefix)
-        };
+            let name = if (option::is_some(&name_with_index_suffix)) {
+                string_utils::format3(&b"{}{}{}", name_prefix, index, option::extract(&mut name_with_index_suffix))
+            } else {
+                name_prefix
+            };
 
-        let deprecated_index = if (features::concurrent_assets_enabled()) {
-            0
-        } else {
-            aggregator_v2::read_snapshot(&index)
-        };
-
-        let deprecated_name = if (features::concurrent_assets_enabled()) {
-            string::utf8(b"")
-        } else {
-            aggregator_v2::read_snapshot(&name)
+            (index, name)
         };
 
         let token = Token {
@@ -151,12 +178,6 @@ module aptos_token_objects::token {
             mutation_events: object::new_event_handle(&object_signer),
         };
         move_to(&object_signer, token);
-
-        let token_concurrent = TokenConcurrentFieldsAppendix {
-            index,
-            name,
-        };
-        move_to(&object_signer, token_concurrent);
 
         if (option::is_some(&royalty)) {
             royalty::init(constructor_ref, option::extract(&mut royalty))
@@ -321,7 +342,7 @@ module aptos_token_objects::token {
     #[view]
     /// Avoid this method in the same transaction as the token is minted
     /// as that would prohibit transactions to be executed in parallel.
-    public fun name<T: key>(token: Object<T>): String acquires Token {
+    public fun name<T: key>(token: Object<T>): String acquires Token, TokenConcurrentFieldsAppendix {
         let token_address = object::object_address(&token);
         if (exists<TokenConcurrentFieldsAppendix>(token_address)) {
             aggregator_v2::read_snapshot(&borrow_global<TokenConcurrentFieldsAppendix>(token_address).name)
@@ -366,7 +387,12 @@ module aptos_token_objects::token {
     /// Avoid this method in the same transaction as the token is minted
     /// as that would prohibit transactions to be executed in parallel.
     public fun index<T: key>(token: Object<T>): u64 acquires Token, TokenConcurrentFieldsAppendix {
-        aggregator_v2::read_snapshot(&index_snapshot(&token))
+        let token_address = object::object_address(&token);
+        if (exists<TokenConcurrentFieldsAppendix>(token_address)) {
+            aggregator_v2::read_snapshot(&borrow_global<TokenConcurrentFieldsAppendix>(token_address).index)
+        } else {
+            borrow(&token).index
+        }
     }
 
     // Mutators

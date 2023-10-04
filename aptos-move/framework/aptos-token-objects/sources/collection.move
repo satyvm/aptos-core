@@ -24,7 +24,7 @@ module aptos_token_objects::collection {
     use std::string::{Self, String};
     use aptos_framework::aggregator_v2::{Self, Aggregator, AggregatorSnapshot};
     use aptos_framework::event;
-    use aptos_framework::object::{Self, ConstructorRef, Object};
+    use aptos_framework::object::{Self, ConstructorRef, ExtendRef, Object};
 
     use aptos_token_objects::royalty::{Self, Royalty};
 
@@ -42,6 +42,10 @@ module aptos_token_objects::collection {
     const EDESCRIPTION_TOO_LONG: u64 = 5;
     /// The max supply must be positive
     const EMAX_SUPPLY_CANNOT_BE_ZERO: u64 = 6;
+    /// Concurrent feature flag is not yet enabled, so the function cannot be performed
+    const ECONCURRENT_NOT_ENABLED: u64 = 7;
+    /// Tried upgrading collection to concurrent, but collection is already concurrent
+    const EALREADY_CONCURRENT: u64 = 8;
 
     const MAX_COLLECTION_NAME_LENGTH: u64 = 128;
     const MAX_URI_LENGTH: u64 = 512;
@@ -423,11 +427,59 @@ module aptos_token_objects::collection {
         MutatorRef { self: object::object_address(&object) }
     }
 
-    // public fun upgrade_to_concurrent(
-    //     ref: &ExtendRef,
-    // ) acquires FixedSupply, UnlimitedSupply, ConcurrentSupply {
-    //     // to implement
-    // }
+    public fun upgrade_to_concurrent(
+        ref: &ExtendRef,
+    ) acquires FixedSupply, UnlimitedSupply {
+        let metadata_object_address = object::address_from_extend_ref(ref);
+        let metadata_object_signer = object::generate_signer_for_extending(ref);
+        assert!(features::concurrent_assets_enabled(), error::invalid_argument(ECONCURRENT_NOT_ENABLED));
+
+        if (exists<FixedSupply>(metadata_object_address)) {
+            let FixedSupply {
+                current_supply,
+                max_supply,
+                total_minted,
+                burn_events,
+                mint_events,
+            } = move_from<FixedSupply>(metadata_object_address);
+
+            event::destroy_handle(burn_events);
+            event::destroy_handle(mint_events);
+
+            let supply = ConcurrentSupply {
+                current_supply: aggregator_v2::create_aggregator(max_supply),
+                total_minted: aggregator_v2::create_unbounded_aggregator(),
+            };
+
+            // update current state:
+            aggregator_v2::add(&mut supply.current_supply, current_supply);
+            aggregator_v2::add(&mut supply.total_minted, total_minted);
+            move_to(&metadata_object_signer, supply);
+        } else if (exists<UnlimitedSupply>(metadata_object_address)) {
+            let UnlimitedSupply {
+                current_supply,
+                total_minted,
+                burn_events,
+                mint_events,
+            } = move_from<UnlimitedSupply>(metadata_object_address);
+
+            event::destroy_handle(burn_events);
+            event::destroy_handle(mint_events);
+
+            let supply = ConcurrentSupply {
+                current_supply: aggregator_v2::create_unbounded_aggregator(),
+                total_minted: aggregator_v2::create_unbounded_aggregator(),
+            };
+
+            // update current state:
+            aggregator_v2::add(&mut supply.current_supply, current_supply);
+            aggregator_v2::add(&mut supply.total_minted, total_minted);
+            move_to(&metadata_object_signer, supply);
+        } else {
+            // untracked collection is already concurrent, and other variants too.
+            abort error::invalid_argument(EALREADY_CONCURRENT)
+        }
+    }
 
     // Accessors
 

@@ -20,8 +20,8 @@ const MAX_TRANSACTION_CHUNK_SIZE: u64 = 20_000;
 const MAX_TRANSACTION_OUTPUT_CHUNK_SIZE: u64 = 20_000;
 
 // The maximum number of concurrent requests to send
-const MAX_CONCURRENT_REQUESTS: u64 = 20;
-const MAX_CONCURRENT_STATE_REQUESTS: u64 = 20;
+const MAX_CONCURRENT_REQUESTS: u64 = 6;
+const MAX_CONCURRENT_STATE_REQUESTS: u64 = 6;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(default, deny_unknown_fields)]
@@ -188,10 +188,10 @@ impl Default for StorageServiceConfig {
             max_lru_cache_size: 500, // At ~0.6MiB per chunk, this should take no more than 0.5GiB
             max_network_channel_size: 4000,
             max_network_chunk_bytes: MAX_MESSAGE_SIZE as u64,
-            max_num_active_subscriptions: 30,
+            max_num_active_subscriptions: 40,
             max_optimistic_fetch_period_ms: 10_000, // 10 seconds
             max_state_chunk_size: MAX_STATE_CHUNK_SIZE,
-            max_subscription_period_ms: 30_000, // 30 seconds
+            max_subscription_period_ms: 60_000, // 60 seconds
             max_transaction_chunk_size: MAX_TRANSACTION_CHUNK_SIZE,
             max_transaction_output_chunk_size: MAX_TRANSACTION_OUTPUT_CHUNK_SIZE,
             min_time_to_ignore_peers_secs: 300, // 5 minutes
@@ -240,7 +240,7 @@ pub struct DataStreamingServiceConfig {
 impl Default for DataStreamingServiceConfig {
     fn default() -> Self {
         Self {
-            enable_subscription_streaming: false,
+            enable_subscription_streaming: true,
             global_summary_refresh_interval_ms: 50,
             max_concurrent_requests: MAX_CONCURRENT_REQUESTS,
             max_concurrent_state_requests: MAX_CONCURRENT_STATE_REQUESTS,
@@ -298,16 +298,16 @@ impl Default for AptosDataClientConfig {
             max_num_in_flight_priority_polls: 10,
             max_num_in_flight_regular_polls: 10,
             max_num_output_reductions: 0,
-            max_optimistic_fetch_lag_secs: 60, // 60 seconds
+            max_optimistic_fetch_lag_secs: 120, // 120 seconds
             max_response_timeout_ms: 240_000,  // 240 seconds
             max_state_chunk_size: MAX_STATE_CHUNK_SIZE,
-            max_subscription_lag_secs: 60, // 60 seconds
+            max_subscription_lag_secs: 120, // 120 seconds
             max_transaction_chunk_size: MAX_TRANSACTION_CHUNK_SIZE,
             max_transaction_output_chunk_size: MAX_TRANSACTION_OUTPUT_CHUNK_SIZE,
             optimistic_fetch_timeout_ms: 10_000, // 10 seconds
             response_timeout_ms: 120_000,        // 120 seconds
             summary_poll_loop_interval_ms: 200,
-            subscription_response_timeout_ms: 20_000, // 20 seconds (must be longer than a regular timeout because of pre-fetching)
+            subscription_response_timeout_ms: 60_000, // 60 seconds (must be longer than a regular timeout because of pre-fetching)
             use_compression: true,
         }
     }

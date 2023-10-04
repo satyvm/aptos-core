@@ -17,8 +17,8 @@ pub(crate) struct BlockPartitioningStage {
 }
 
 impl BlockPartitioningStage {
-    pub fn new(num_shards: usize, partitioner_config: &dyn PartitionerConfig) -> Self {
-        let maybe_partitioner = if num_shards <= 1 {
+    pub fn new(num_shards: usize, partitioner_config: &dyn PartitionerConfig, force_partitioning: bool) -> Self {
+        let maybe_partitioner = if num_shards <= 1 && !force_partitioning {
             None
         } else {
             let partitioner = partitioner_config.build();

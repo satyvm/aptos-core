@@ -138,6 +138,7 @@ enum ExecutionStatus {
     Executing(Incarnation),
     Suspended(Incarnation, DependencyCondvar),
     Executed(Incarnation),
+    // rename to Finalized or ReadyToCommit / CommitReady? it gets committed later, without scheduler tracking.
     Committed(Incarnation),
     Aborting(Incarnation),
     ExecutionHalted,
@@ -326,7 +327,7 @@ impl Scheduler {
     }
 
     /// If successful, returns Some(TxnIndex), the index of committed transaction.
-    pub fn try_commit(&self) -> Option<TxnIndex> {
+    pub fn try_commit(&self) -> Option<(TxnIndex, Incarnation)> {
         let mut commit_state = self.commit_state.acquire();
         let (commit_idx, commit_wave) = commit_state.dereference_mut();
 
@@ -362,7 +363,7 @@ impl Scheduler {
                             // All txns have been committed, the parallel execution can finish.
                             self.done_marker.store(true, Ordering::SeqCst);
                         }
-                        return Some(*commit_idx - 1);
+                        return Some((*commit_idx - 1, incarnation));
                     }
                 }
             }
@@ -568,6 +569,38 @@ impl Scheduler {
         }
 
         SchedulerTask::NoTask
+    }
+
+    pub fn finish_execution_during_commit(&self, txn_idx: TxnIndex) {
+        // we have exclusivity on this transaction
+
+        let txn_deps: Vec<TxnIndex> = {
+            let mut stored_deps = self.txn_dependency[txn_idx as usize].lock();
+            // Holding the lock, take dependency vector.
+            std::mem::take(&mut stored_deps)
+        };
+
+        // Mark dependencies as resolved and find the minimum index among them.
+        let min_dep = txn_deps
+            .into_iter()
+            .map(|dep| {
+                // Mark the status of dependencies as 'Ready' since dependency on
+                // transaction txn_idx is now resolved.
+                self.resume(dep);
+
+                dep
+            })
+            .min();
+        if let Some(execution_target_idx) = min_dep {
+            // Decrease the execution index as necessary to ensure resolved dependencies
+            // get a chance to be re-executed.
+            self.execution_idx
+                .fetch_min(execution_target_idx, Ordering::SeqCst);
+        }
+
+        // we skipped decreasing validation index when invalidating,
+        // as we were executing it immediately, and are doing so now. (unconditionally)
+        self.decrease_validation_idx(txn_idx + 1);
     }
 
     /// Finalize a validation task of version (txn_idx, incarnation). In some cases,

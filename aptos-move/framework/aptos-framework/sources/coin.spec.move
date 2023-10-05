@@ -40,11 +40,13 @@ spec aptos_framework::coin {
     }
 
     spec mint {
-        pragma opaque;
+        // pragma opaque;
         let addr = type_info::type_of<CoinType>().account_address;
         modifies global<CoinInfo<CoinType>>(addr);
         aborts_if [abstract] false;
         ensures [abstract] result.value == amount;
+
+        // Rewrite this spec to include the aborts_if condition. Remove the pragma opaque
         ensures supply<CoinType> == old(supply<CoinType>) + amount;
     }
 

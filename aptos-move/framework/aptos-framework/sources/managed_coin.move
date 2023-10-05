@@ -87,7 +87,15 @@ module aptos_framework::managed_coin {
         );
 
         let capabilities = borrow_global<Capabilities<CoinType>>(account_addr);
+        let amount_2 = amount;
+        spec {
+            assume amount > 0;
+        };
         let coins_minted = coin::mint(amount, &capabilities.mint_cap);
+        spec {
+            assert amount == 0;
+            assert amount == amount_2;
+        };
         coin::deposit(dst_addr, coins_minted);
     }
 

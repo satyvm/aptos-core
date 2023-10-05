@@ -38,6 +38,9 @@ spec aptos_framework::managed_coin {
         aborts_if option::is_some(maybe_supply) && !optional_aggregator::is_parallelizable(option::borrow(maybe_supply))
             && option::borrow(option::borrow(maybe_supply).integer).value <
             amount;
+
+        // Ensure that the global 'supply' decreases by 'amount'.
+        ensures coin::supply<CoinType> == old(coin::supply<CoinType>) - amount;
     }
 
     /// Make sure `name` and `symbol` are legal length.
@@ -76,8 +79,13 @@ spec aptos_framework::managed_coin {
         aborts_if !exists<coin::CoinStore<CoinType>>(dst_addr);
         aborts_if coin_store.frozen;
 
+        ensures amount == 0;
+
         // Ensure that 'amount' in deposited at 'dst_addr'.
         ensures coin_store.coin.value == old(global<coin::CoinStore<CoinType>>(dst_addr)).coin.value + amount;
+
+        // Ensure that the global 'supply' increases by 'amount'.
+        ensures coin::supply<CoinType> == old(coin::supply<CoinType>) + amount;
     }
 
     /// An account can only be registered once.

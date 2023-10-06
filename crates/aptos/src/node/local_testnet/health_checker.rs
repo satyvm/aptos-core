@@ -47,7 +47,7 @@ impl HealthChecker {
                     url.clone(),
                     Some(Duration::from_secs(5)),
                 )
-                .await;
+                .await?;
                 let request = tonic::Request::new(GetTransactionsRequest {
                     starting_version: Some(0),
                     ..Default::default()

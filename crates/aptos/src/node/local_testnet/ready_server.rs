@@ -52,7 +52,7 @@ impl ServiceManager for ReadyServerManager {
         "Ready Server".to_string()
     }
 
-    fn get_healthchecks(&self) -> HashSet<HealthChecker> {
+    fn get_health_checkers(&self) -> HashSet<HealthChecker> {
         // We don't health check the service that exposes health checks.
         hashset! {}
     }

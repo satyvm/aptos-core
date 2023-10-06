@@ -26,7 +26,7 @@ use tracing::{info, warn};
 const INDEXER_API_CONTAINER_NAME: &str = "indexer-api";
 const HASURA_IMAGE: &str = "hasura/graphql-engine:v2.33.0";
 
-/// This Hasura metadata origintes from the aptos-indexer-processors repo.
+/// This Hasura metadata originates from the aptos-indexer-processors repo.
 ///
 /// This metadata is from revision: 1b8e14d9669258f797403e2b38da9ea5aea29e35.
 ///
@@ -42,9 +42,9 @@ const HASURA_METADATA: &str = include_str!("hasura_metadata.json");
 pub struct IndexerApiArgs {
     /// If set, we will run a postgres DB using Docker (unless
     /// --use-host-postgres is set), run the standard set of indexer processors (see
-    /// --processors) and configure them to write to this DB, and run an API that lets
+    /// --processors), and configure them to write to this DB, and run an API that lets
     /// you access the data they write to storage. This is opt in because it requires
-    /// Docker to be installed in the host system.
+    /// Docker to be installed on the host system.
     #[clap(long, conflicts_with = "no_txn_stream")]
     pub with_indexer_api: bool,
 
@@ -106,7 +106,7 @@ impl ServiceManager for IndexerApiManager {
         Ok(())
     }
 
-    fn get_healthchecks(&self) -> HashSet<HealthChecker> {
+    fn get_health_checkers(&self) -> HashSet<HealthChecker> {
         hashset! {HealthChecker::Http(
             Url::parse(&format!("http://127.0.0.1:{}", self.indexer_api_port)).unwrap(),
             self.get_name(),
@@ -120,24 +120,6 @@ impl ServiceManager for IndexerApiManager {
     async fn run_service(self: Box<Self>) -> Result<()> {
         setup_docker_logging(&self.test_dir, "indexer-api", INDEXER_API_CONTAINER_NAME)?;
 
-        // Unconditionally use host.docker.internal instead of 127.0.0.1 to access the
-        // host system. This currently works out of the box on Docker for Desktop on
-        // Mac and Windows. On Linux, this requires that you bind the name to the host
-        // gateway, which we do below.
-        let postgres_connection_string = self
-            .postgres_connection_string
-            .replace("127.0.0.1", "host.docker.internal");
-
-        info!(
-            "Using postgres connection string: {}",
-            postgres_connection_string
-        );
-
-        let options = Some(CreateContainerOptions {
-            name: INDEXER_API_CONTAINER_NAME,
-            ..Default::default()
-        });
-
         let exposed_ports = Some(hashmap! {self.indexer_api_port.to_string() => hashmap!{}});
         let mut host_config = HostConfig {
             port_bindings: Some(hashmap! {
@@ -149,9 +131,42 @@ impl ServiceManager for IndexerApiManager {
             ..Default::default()
         };
 
-        if cfg!(target_os = "linux") {
-            host_config.extra_hosts = Some(vec!["host.docker.internal:host-gateway".to_string()]);
-        }
+        let docker = get_docker()?;
+
+        // When using Docker Desktop you can and indeed must use the magic hostname
+        // host.docker.internal in order to access localhost on the host system from
+        // within the container. This also theoretically works without Docker Desktop,
+        // but you have to manually add the name to /etc/hosts in the container, and in
+        // my experience even that doesn't work sometimes. So when in a Docker Desktop
+        // environment we replace 127.0.0.1 with host.docker.internal, whereas in other
+        // environments we still use 127.0.0.1 and use host networking mode.
+        //
+        // In practice, this means we do the replacement when on MacOS or Windows, both
+        // standard (NT) and WSL and we don't do it on Linux / when running from within
+        // a container. But checking for OS is not accurate, since for example we must
+        // do the replacement when running in WSL configured to use the host Docker
+        // daemon but not when running in WSL configured to use Docker from within the
+        // WSL environment. So instead of checking for OS we check the name of the
+        // Docker daemon.
+        let info = docker
+            .info()
+            .await
+            .context("Failed to get info about Docker daemon")?;
+        let is_docker_desktop = info.name == Some("docker-desktop".to_string());
+        let postgres_connection_string = if is_docker_desktop {
+            info!("Running with Docker Desktop, using host.docker.internal");
+            self.postgres_connection_string
+                .replace("127.0.0.1", "host.docker.internal")
+        } else {
+            info!("Not running with Docker Desktop, using host networking mode");
+            host_config.network_mode = Some("host".to_string());
+            self.postgres_connection_string
+        };
+
+        info!(
+            "Using postgres connection string: {}",
+            postgres_connection_string
+        );
 
         let config = Config {
             image: Some(HASURA_IMAGE.to_string()),
@@ -173,9 +188,12 @@ impl ServiceManager for IndexerApiManager {
             ..Default::default()
         };
 
-        info!("Starting indexer API with this config: {:#?}", config);
+        let options = Some(CreateContainerOptions {
+            name: INDEXER_API_CONTAINER_NAME,
+            ..Default::default()
+        });
 
-        let docker = get_docker()?;
+        info!("Starting indexer API with this config: {:?}", config);
 
         let id = docker.create_container(options, config).await?.id;
 

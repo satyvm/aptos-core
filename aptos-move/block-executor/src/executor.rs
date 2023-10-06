@@ -12,7 +12,7 @@ use crate::{
     errors::*,
     explicit_sync_wrapper::ExplicitSyncWrapper,
     scheduler::{DependencyStatus, ExecutionTaskType, Scheduler, SchedulerTask, Wave},
-    task::{CategorizeError, ErrorCategory, ExecutionStatus, ExecutorTask, TransactionOutput},
+    task::{ErrorCategory, ExecutionStatus, ExecutorTask, TransactionOutput},
     txn_commit_hook::TransactionCommitHook,
     txn_last_input_output::TxnLastInputOutput,
     view::{LatestView, ParallelState, SequentialState, ViewState},
@@ -63,7 +63,6 @@ impl<T, E, S, L, X> BlockExecutor<T, E, S, L, X>
 where
     T: Transaction,
     E: ExecutorTask<Txn = T>,
-    E::Error: CategorizeError,
     S: TStateView<Key = T::Key> + Sync,
     L: TransactionCommitHook<Output = E::Output>,
     X: Executable + 'static,
@@ -88,6 +87,10 @@ where
             transaction_commit_hook,
             phantom: PhantomData,
         }
+    }
+
+    fn fallback_to_sequential() {
+        unimplemented!();
     }
 
     fn execute(
@@ -183,19 +186,16 @@ where
                 ExecutionStatus::SkipRest(output)
             },
             ExecutionStatus::Abort(err) => {
-                match err.categorize() {
-                    ErrorCategory::CodeInvariantError => {
-                        // TODO fallback to speculative execution
-                        panic!("");
-                    },
-                    ErrorCategory::SpeculativeExecutionError => {
-                        speculative_inconsistent = true;
-                    },
-                    _ => (),
-                };
-
                 // Record the status indicating abort.
                 ExecutionStatus::Abort(Error::UserError(err))
+            },
+            ExecutionStatus::SpeculativeExecutionAbortError(msg) => {
+                speculative_inconsistent = true;
+                ExecutionStatus::SpeculativeExecutionAbortError(msg)
+            },
+            ExecutionStatus::DelayedFieldsCodeInvariantError(msg) => {
+                Self::fallback_to_sequential();
+                ExecutionStatus::DelayedFieldsCodeInvariantError(msg)
             },
         };
 
@@ -234,8 +234,7 @@ where
             .expect("[BlockSTM]: Prior read-set must be recorded");
 
         if read_set.validate_incorrect_use() {
-            // TODO fallback to speculative
-            panic!("Incorrect use !");
+            Self::fallback_to_sequential();
         }
 
         // Note: we validate delayed field reads only at try_commit.
@@ -674,6 +673,10 @@ where
                 ExecutionStatus::Abort(_) => {
                     txn_commit_listener.on_execution_aborted(txn_idx);
                 },
+                ExecutionStatus::SpeculativeExecutionAbortError(msg)
+                | ExecutionStatus::DelayedFieldsCodeInvariantError(msg) => {
+                    panic!("Cannot be materializing with {}", msg);
+                },
             }
         }
 
@@ -683,6 +686,10 @@ where
                 final_results[txn_idx as usize] = t;
             },
             ExecutionStatus::Abort(_) => (),
+            ExecutionStatus::SpeculativeExecutionAbortError(msg)
+            | ExecutionStatus::DelayedFieldsCodeInvariantError(msg) => {
+                panic!("Cannot be materializing with {}", msg);
+            },
         };
     }
 
@@ -987,20 +994,23 @@ where
                     ret.push(output);
                 },
                 ExecutionStatus::Abort(err) => {
-                    match err.categorize() {
-                        ErrorCategory::CodeInvariantError
-                        | ErrorCategory::SpeculativeExecutionError => panic!(
-                            "Sequential execution must not have delayed fields errors: {:?}",
-                            err
-                        ),
-                        _ => (),
-                    };
-
                     if let Some(commit_hook) = &self.transaction_commit_hook {
                         commit_hook.on_execution_aborted(idx as TxnIndex);
                     }
                     // Record the status indicating abort.
                     return Err(Error::UserError(err));
+                },
+                ExecutionStatus::SpeculativeExecutionAbortError(msg) => {
+                    panic!(
+                        "Sequential execution must not have SpeculativeExecutionAbortError: {:?}",
+                        msg
+                    );
+                },
+                ExecutionStatus::DelayedFieldsCodeInvariantError(msg) => {
+                    panic!(
+                        "Sequential execution must not have DelayedFieldsCodeInvariantError: {:?}",
+                        msg
+                    );
                 },
             }
             // When the txn is a SkipRest txn, halt sequential execution.
